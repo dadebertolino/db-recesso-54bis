@@ -1,0 +1,30 @@
+{
+    "name": "dadebertolino/db-recesso-54bis",
+    "description": "Funzione digitale di recesso (art. 54-bis Cod. Consumo) e garanzia legale di conformità per WooCommerce. Self-contained, privacy-first, zero dipendenze esterne.",
+    "type": "wordpress-plugin",
+    "license": "GPL-2.0-or-later",
+    "authors": [
+        {
+            "name": "Davide Bertolino",
+            "homepage": "https://davidebertolino.it"
+        }
+    ],
+    "require": {
+        "php": ">=8.0"
+    },
+    "require-dev": {
+        "dealerdirect/phpcodesniffer-composer-installer": "^1.0",
+        "wp-coding-standards/wpcs": "^3.2",
+        "phpcompatibility/phpcompatibility-wp": "^2.1"
+    },
+    "scripts": {
+        "lint": "find . -name '*.php' -not -path './vendor/*' -print0 | xargs -0 -n1 -P4 php -l",
+        "phpcs": "phpcs --standard=phpcs.xml.dist",
+        "phpcbf": "phpcbf --standard=phpcs.xml.dist"
+    },
+    "config": {
+        "allow-plugins": {
+            "dealerdirect/phpcodesniffer-composer-installer": true
+        }
+    }
+}

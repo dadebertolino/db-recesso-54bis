@@ -1,0 +1,54 @@
+/**
+ * DB Recesso 54-bis — admin styles.
+ * Uses the shared DB Admin UI design system variables (db-admin-ui.css).
+ */
+
+.dbr54-badge {
+	display: inline-block;
+	padding: 2px 10px;
+	border-radius: 999px;
+	font-size: 12px;
+	font-weight: 600;
+	line-height: 1.6;
+}
+
+.dbr54-badge-ricevuto {
+	background: var(--db-warning-light);
+	color: var(--db-warning-dark);
+}
+
+.dbr54-badge-evaso {
+	background: var(--db-primary-light);
+	color: var(--db-primary-hover);
+}
+
+.dbr54-badge-rimborsato {
+	background: var(--db-success-light);
+	color: var(--db-success);
+}
+
+/* Modulo B — stati pratica garanzia */
+.dbr54-badge-gar-aperta {
+	background: var(--db-warning-light);
+	color: var(--db-warning-dark);
+}
+
+.dbr54-badge-gar-in_lavorazione {
+	background: var(--db-primary-light);
+	color: var(--db-primary-hover);
+}
+
+.dbr54-badge-gar-accolta {
+	background: var(--db-success-light);
+	color: var(--db-success);
+}
+
+.dbr54-badge-gar-respinta {
+	background: var(--db-danger-light);
+	color: var(--db-danger);
+}
+
+.dbr54-badge-gar-chiusa {
+	background: var(--db-bg-subtle);
+	color: var(--db-text-muted);
+}

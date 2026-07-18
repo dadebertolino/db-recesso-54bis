@@ -1,0 +1,89 @@
+<?xml version="1.0"?>
+<ruleset name="DB Recesso 54-bis">
+	<description>Coding standard per DB Recesso 54-bis (WordPress Coding Standards).</description>
+
+	<file>.</file>
+
+	<exclude-pattern>*/vendor/*</exclude-pattern>
+	<exclude-pattern>*/node_modules/*</exclude-pattern>
+	<exclude-pattern>*/.git/*</exclude-pattern>
+	<!-- File condiviso verbatim tra tutti i plugin DB (stile proprio, versionato
+	     a parte): trattato come vendored. NB: non usare <rule ref="Categoria">
+	     per escluderlo — importerebbe l'intera categoria di sniff. -->
+	<exclude-pattern>inc/class-updater\.php</exclude-pattern>
+
+	<!-- Modalità: mostra sniff, progress, colori; scansione parallela. -->
+	<arg value="sp"/>
+	<arg name="colors"/>
+	<arg name="extensions" value="php"/>
+	<arg name="parallel" value="8"/>
+
+	<!-- Compatibilità dichiarata nel plugin header. -->
+	<config name="minimum_wp_version" value="5.8"/>
+	<config name="testVersion" value="8.0-"/>
+
+	<rule ref="WordPress">
+		<!-- Il progetto usa nomi file class-*.php ma senza il vincolo completo WP. -->
+		<exclude name="WordPress.Files.FileName.InvalidClassFileName"/>
+		<!-- Commenti in italiano/inglese misti: le regole di formato docblock
+		     producono solo rumore. -->
+		<exclude name="Squiz.Commenting"/>
+		<exclude name="Generic.Commenting"/>
+		<!-- Stile consolidato del progetto: consentito allineamento libero. -->
+		<exclude name="WordPress.Arrays.MultipleStatementAlignment"/>
+		<exclude name="Generic.Formatting.MultipleStatementAlignment"/>
+		<!-- Il plugin gestisce tabelle custom (recessi, pratiche garanzia): le
+		     query dirette sono l'architettura, non un incidente. dbDelta è lo
+		     schema change voluto. -->
+		<exclude name="WordPress.DB.DirectDatabaseQuery"/>
+		<!-- I nomi tabella derivano SEMPRE da $wpdb->prefix + costante di classe,
+		     mai da input; i VALORI passano tutti da prepare(). Lo sniff
+		     NotPrepared, più severo, resta attivo e non rileva nulla. -->
+		<exclude name="WordPress.DB.PreparedSQL.InterpolatedNotPrepared"/>
+		<!-- Letture $_GET display-only (tab correnti, filtri elenco, paginazione):
+		     nessun cambio di stato. La variante .Missing (azioni con side effect)
+		     resta attiva. -->
+		<exclude name="WordPress.Security.NonceVerification.Recommended"/>
+		<!-- Le ricevute su supporto durevole sono PDF binari scritti/rimossi con
+		     le funzioni PHP native: WP_Filesystem non gestisce append binario
+		     affidabile su tutti gli host, e l'I/O è locale alla cartella uploads
+		     del plugin. Pattern coerente con l'export file degli altri plugin DB. -->
+		<exclude name="WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents"/>
+		<exclude name="WordPress.WP.AlternativeFunctions.file_system_operations_rmdir"/>
+		<exclude name="WordPress.WP.AlternativeFunctions.unlink_unlink"/>
+		<!-- @ silenziato solo su operazioni filesystem best-effort (creazione
+		     index.html/.htaccess di protezione, unlink in cleanup): il fallimento
+		     è previsto e non deve interrompere il flusso. -->
+		<exclude name="WordPress.PHP.NoSilencedErrors.Discouraged"/>
+	</rule>
+
+	<!-- Capability WooCommerce usate dal plugin (non note allo sniff core). -->
+	<rule ref="WordPress.WP.Capabilities">
+		<properties>
+			<property name="custom_capabilities" type="array">
+				<element value="manage_woocommerce"/>
+			</property>
+		</properties>
+	</rule>
+
+	<!-- Prefissi consentiti per funzioni/classi/hook globali. -->
+	<rule ref="WordPress.NamingConventions.PrefixAllGlobals">
+		<properties>
+			<property name="prefixes" type="array">
+				<element value="dbr54"/>
+				<element value="DBR54"/>
+				<element value="DB_GitHub_Updater"/>
+				<element value="dbgu"/>
+			</property>
+		</properties>
+	</rule>
+
+	<!-- Text domain del plugin. -->
+	<rule ref="WordPress.WP.I18n">
+		<properties>
+			<property name="text_domain" type="array">
+				<element value="db-recesso-54bis"/>
+			</property>
+		</properties>
+	</rule>
+</ruleset>

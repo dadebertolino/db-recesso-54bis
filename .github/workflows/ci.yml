@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+
+jobs:
+  lint:
+    name: PHP Lint (${{ matrix.php }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 8.0 = minimo dichiarato nel plugin header, 8.3 = target corrente.
+        php: [ '8.0', '8.3' ]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP ${{ matrix.php }}
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+          tools: none
+
+      - name: Syntax check
+        run: |
+          find . -name '*.php' -not -path './vendor/*' -not -path './.git/*' -print0 \
+            | xargs -0 -n1 -P4 php -l
+
+  phpcs:
+    name: PHPCS (WordPress Coding Standards)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+          tools: composer
+
+      - name: Cache Composer packages
+        uses: actions/cache@v4
+        with:
+          path: vendor
+          key: composer-${{ runner.os }}-${{ hashFiles('composer.json') }}
+          restore-keys: composer-${{ runner.os }}-
+
+      - name: Install dev dependencies
+        run: composer install --no-interaction --no-progress
+
+      - name: Run PHPCS
+        run: vendor/bin/phpcs --standard=phpcs.xml.dist --report=full --no-cache
+
+      - name: Check PHP 8.0+ compatibility
+        run: |
+          vendor/bin/phpcs --standard=PHPCompatibilityWP \
+            --runtime-set testVersion 8.0- \
+            --extensions=php --ignore=vendor --report=full --no-cache .
