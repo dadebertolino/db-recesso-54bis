@@ -20,7 +20,7 @@
 
 	<!-- Compatibilità dichiarata nel plugin header. -->
 	<config name="minimum_wp_version" value="5.8"/>
-	<config name="testVersion" value="8.0-"/>
+	<config name="testVersion" value="7.4-"/>
 
 	<rule ref="WordPress">
 		<!-- Il progetto usa nomi file class-*.php ma senza il vincolo completo WP. -->

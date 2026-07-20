@@ -3,7 +3,7 @@
  * Plugin Name:       DB Recesso 54-bis
  * Plugin URI:        https://www.davidebertolino.it/progetti/
  * Description:        Funzione digitale di recesso conforme all'art. 54-bis del Codice del Consumo (D.Lgs. 209/2025). Aggiunge a WooCommerce un pulsante di recesso, dichiarazione guidata, ricevuta su supporto durevole e integrazione privacy. Self-contained, zero dipendenze esterne.
- * Version:           1.2.0
+ * Version:           1.2.1
  * Author:            Davide Bertolino
  * Author URI:        https://www.davidebertolino.it
  * License:           GPL v2 or later
@@ -11,7 +11,7 @@
  * Text Domain:       db-recesso-54bis
  * Domain Path:       /languages
  * Requires at least: 5.8
- * Requires PHP:      8.0
+ * Requires PHP:      7.4
  * WC requires at least: 7.0
  * WC tested up to:   9.9
  *
@@ -22,7 +22,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'DBR54_VERSION', '1.2.0' );
+define( 'DBR54_VERSION', '1.2.1' );
 define( 'DBR54_FILE', __FILE__ );
 define( 'DBR54_PATH', plugin_dir_path( __FILE__ ) );
 define( 'DBR54_URL', plugin_dir_url( __FILE__ ) );

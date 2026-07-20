@@ -6,11 +6,11 @@ Self-contained, gratuito, senza nag né telemetria, installabile in 30 secondi. 
 
 | | |
 |---|---|
-| Versione | 1.2.0 |
+| Versione | 1.2.1 |
 | Autore | Davide Bertolino |
 | Licenza | GPL v2 or later |
 | WP minimo | 5.8+ |
-| PHP minimo | 8.0+ |
+| PHP minimo | 7.4+ |
 | WooCommerce | 7.0+ (HPOS) |
 
 ## Due moduli indipendenti
@@ -80,7 +80,8 @@ Attivabile in modo indipendente. Gestisce una pratica RMA leggera per prodotti d
 
 - **v1.0.0** — Modulo A (recesso), timestamp base, Privacy Hub, ricevuta PDF, email, admin.
 - **v1.1.0** — Timestamp rafforzato RFC 3161 opt-in.
-- **v1.2.0** — Modulo B: reso in garanzia legale di conformità (artt. 128-135), modulo separato. *(corrente)*
+- **v1.2.0** — Modulo B: reso in garanzia legale di conformità (artt. 128-135), modulo separato.
+- **v1.2.1** — Compatibilità PHP 7.4+ (abbassato il requisito minimo). *(corrente)*
 
 ## Disinstallazione
 
