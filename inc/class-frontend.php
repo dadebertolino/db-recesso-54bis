@@ -34,6 +34,15 @@ class DBR54_Frontend {
 		// Guest access shortcode: [dbr54_recesso_guest].
 		add_shortcode( 'dbr54_recesso_guest', array( $this, 'guest_shortcode' ) );
 
+		// Keep page caches away from the page carrying the guest form.
+		add_action(
+			'template_redirect',
+			static function () {
+				DBR54_Guest_Guard::no_cache_if_shortcode( 'dbr54_recesso_guest' );
+			},
+			1
+		);
+
 		// Handle form submissions early.
 		add_action( 'template_redirect', array( $this, 'handle_submission' ) );
 
@@ -191,29 +200,54 @@ class DBR54_Frontend {
 
 	/**
 	 * Guest access via shortcode: order number + email lookup.
+	 *
+	 * Anonymous visitors are verified by DBR54_Guest_Guard (same-site origin +
+	 * per-IP rate limit, no nonce in cached HTML); logged-in users by nonce.
+	 * Handles both the lookup POST and the step 1 → step 2 POST of the guest
+	 * flow (the latter carries order id + email instead of the lookup fields).
 	 */
 	public function guest_shortcode(): string {
+		DBR54_Guest_Guard::no_cache();
 		ob_start();
 
 		if ( $this->maybe_render_result() ) {
 			return ob_get_clean();
 		}
 
-		$order   = null;
 		$matched = false;
 
-		if ( isset( $_POST['dbr54_guest_lookup'] ) && check_admin_referer( 'dbr54_guest_lookup', 'dbr54_guest_nonce' ) ) {
-			$number = isset( $_POST['dbr54_order_number'] ) ? sanitize_text_field( wp_unslash( $_POST['dbr54_order_number'] ) ) : '';
-			$email  = isset( $_POST['dbr54_email'] ) ? sanitize_email( wp_unslash( $_POST['dbr54_email'] ) ) : '';
-			$order  = $this->lookup_guest_order( $number, $email );
+		// phpcs:disable WordPress.Security.NonceVerification.Missing -- verificati in DBR54_Guest_Guard::verify() (nonce per i loggati, origin + rate limit per gli anonimi).
+		$is_lookup = isset( $_POST['dbr54_guest_lookup'] );
+		$is_step   = ! $is_lookup
+			&& isset( $_POST['dbr54_step'], $_POST['dbr54_order_id'], $_POST['dbr54_declarant_type'] )
+			&& 'guest' === sanitize_key( $_POST['dbr54_declarant_type'] );
 
-			if ( $order ) {
-				$matched = true;
-				$this->render_flow( $order, 'guest', $email );
+		if ( $is_lookup || $is_step ) {
+			$order_id = $is_step ? absint( $_POST['dbr54_order_id'] ) : 0;
+			$error    = $is_lookup
+				? DBR54_Guest_Guard::verify( 'dbr54_guest_lookup', 'dbr54_guest_nonce' )
+				: DBR54_Guest_Guard::verify( 'dbr54_declare_' . $order_id, 'dbr54_nonce' );
+
+			if ( '' !== $error ) {
+				$this->notice( $error, 'error' );
 			} else {
-				$this->notice( __( 'Nessun ordine corrisponde ai dati inseriti.', 'db-recesso-54bis' ), 'error' );
+				if ( $is_lookup ) {
+					$number = isset( $_POST['dbr54_order_number'] ) ? sanitize_text_field( wp_unslash( $_POST['dbr54_order_number'] ) ) : '';
+				} else {
+					$number = (string) $order_id;
+				}
+				$email = isset( $_POST['dbr54_email'] ) ? sanitize_email( wp_unslash( $_POST['dbr54_email'] ) ) : '';
+				$order = $this->lookup_guest_order( $number, $email );
+
+				if ( $order ) {
+					$matched = true;
+					$this->render_flow( $order, 'guest', $email );
+				} else {
+					$this->notice( __( 'Nessun ordine corrisponde ai dati inseriti.', 'db-recesso-54bis' ), 'error' );
+				}
 			}
 		}
+		// phpcs:enable
 
 		if ( ! $matched ) {
 			$this->render_guest_lookup_form();
@@ -244,7 +278,7 @@ class DBR54_Frontend {
 		<form method="post" class="dbr54-form dbr54-guest-lookup">
 			<h2><?php esc_html_e( 'Recesso dal contratto', 'db-recesso-54bis' ); ?></h2>
 			<p><?php esc_html_e( 'Inserisci il numero ordine e l\'email usata per l\'acquisto.', 'db-recesso-54bis' ); ?></p>
-			<?php wp_nonce_field( 'dbr54_guest_lookup', 'dbr54_guest_nonce' ); ?>
+			<?php DBR54_Guest_Guard::nonce_field( 'dbr54_guest_lookup', 'dbr54_guest_nonce' ); ?>
 			<p>
 				<label for="dbr54_order_number"><?php esc_html_e( 'Numero ordine', 'db-recesso-54bis' ); ?></label>
 				<input type="text" id="dbr54_order_number" name="dbr54_order_number" required>
@@ -302,7 +336,7 @@ class DBR54_Frontend {
 			</p>
 
 			<form method="post" class="dbr54-form">
-				<?php wp_nonce_field( 'dbr54_declare_' . $order->get_id(), 'dbr54_nonce' ); ?>
+				<?php DBR54_Guest_Guard::nonce_field( 'dbr54_declare_' . $order->get_id(), 'dbr54_nonce' ); ?>
 				<input type="hidden" name="dbr54_order_id" value="<?php echo esc_attr( $order->get_id() ); ?>">
 				<input type="hidden" name="dbr54_declarant_type" value="<?php echo esc_attr( $declarant_type ); ?>">
 				<?php if ( 'guest' === $declarant_type ) : ?>
@@ -353,7 +387,7 @@ class DBR54_Frontend {
 			<?php endif; ?>
 
 			<form method="post" class="dbr54-form">
-				<?php wp_nonce_field( 'dbr54_confirm_' . $order->get_id(), 'dbr54_nonce' ); ?>
+				<?php DBR54_Guest_Guard::nonce_field( 'dbr54_confirm_' . $order->get_id(), 'dbr54_nonce' ); ?>
 				<input type="hidden" name="dbr54_order_id" value="<?php echo esc_attr( $order->get_id() ); ?>">
 				<input type="hidden" name="dbr54_declarant_type" value="<?php echo esc_attr( $declarant_type ); ?>">
 				<?php if ( 'guest' === $declarant_type ) : ?>
@@ -374,18 +408,35 @@ class DBR54_Frontend {
 	 * Handle the final confirmation POST.
 	 */
 	public function handle_submission(): void {
-		if ( empty( $_POST['dbr54_confirm'] ) ) {
+		if ( empty( $_POST['dbr54_confirm'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Missing -- solo rilevamento del submit; verifica in DBR54_Guest_Guard::verify().
 			return;
 		}
 
+		// phpcs:disable WordPress.Security.NonceVerification.Missing -- verificati in DBR54_Guest_Guard::verify() (nonce per i loggati, origin + rate limit per gli anonimi).
 		$order_id = isset( $_POST['dbr54_order_id'] ) ? absint( $_POST['dbr54_order_id'] ) : 0;
-		if ( ! $order_id || ! check_admin_referer( 'dbr54_confirm_' . $order_id, 'dbr54_nonce' ) ) {
+		if ( ! $order_id ) {
 			return;
+		}
+
+		// Errors are shown to the user via the PRG outcome, never a bare wp_die().
+		$error = DBR54_Guest_Guard::verify( 'dbr54_confirm_' . $order_id, 'dbr54_nonce' );
+		if ( '' !== $error ) {
+			$this->redirect_with_result(
+				array(
+					'success' => false,
+					'error'   => $error,
+				)
+			);
 		}
 
 		$order = wc_get_order( $order_id );
 		if ( ! $order ) {
-			return;
+			$this->redirect_with_result(
+				array(
+					'success' => false,
+					'error'   => __( 'Ordine non trovato.', 'db-recesso-54bis' ),
+				)
+			);
 		}
 
 		$declarant_type = isset( $_POST['dbr54_declarant_type'] ) ? sanitize_key( $_POST['dbr54_declarant_type'] ) : 'user';
@@ -393,19 +444,31 @@ class DBR54_Frontend {
 		$email          = isset( $_POST['dbr54_email'] ) ? sanitize_email( wp_unslash( $_POST['dbr54_email'] ) ) : null;
 		$reason         = isset( $_POST['dbr54_reason'] ) ? sanitize_textarea_field( wp_unslash( $_POST['dbr54_reason'] ) ) : '';
 
+		// phpcs:enable
+
 		// Authorisation re-check.
+		$unauthorised = array(
+			'success' => false,
+			'error'   => __( 'Autorizzazione non valida.', 'db-recesso-54bis' ),
+		);
 		if ( 'user' === $declarant_type ) {
 			if ( ! is_user_logged_in() || $order->get_customer_id() !== get_current_user_id() ) {
-				wp_die( esc_html__( 'Autorizzazione non valida.', 'db-recesso-54bis' ) );
+				$this->redirect_with_result( $unauthorised );
 			}
 			$email = $order->get_billing_email();
 		} elseif ( ! $email || strtolower( $order->get_billing_email() ) !== strtolower( $email ) ) {
-				wp_die( esc_html__( 'Autorizzazione non valida.', 'db-recesso-54bis' ) );
+			$this->redirect_with_result( $unauthorised );
 		}
 
-		$result = $this->recesso()->process( $order, $declarant_type, $email, $reason );
+		$this->redirect_with_result( $this->recesso()->process( $order, $declarant_type, $email, $reason ) );
+	}
 
-		// Store outcome in a short-lived transient keyed to the session/redirect.
+	/**
+	 * PRG: store the outcome in a short-lived transient and redirect.
+	 *
+	 * @return never
+	 */
+	private function redirect_with_result( array $result ): void {
 		$token = wp_generate_password( 20, false, false );
 		set_transient( 'dbr54_result_' . $token, $result, 5 * MINUTE_IN_SECONDS );
 

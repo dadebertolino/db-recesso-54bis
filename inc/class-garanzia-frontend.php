@@ -35,6 +35,15 @@ class DBR54_Garanzia_Frontend {
 
 		add_shortcode( 'dbr54_garanzia_guest', array( $this, 'guest_shortcode' ) );
 
+		// Keep page caches away from the page carrying the guest form.
+		add_action(
+			'template_redirect',
+			static function () {
+				DBR54_Guest_Guard::no_cache_if_shortcode( 'dbr54_garanzia_guest' );
+			},
+			1
+		);
+
 		add_action( 'template_redirect', array( $this, 'handle_submission' ) );
 		add_action( 'wp_enqueue_scripts', array( $this, 'assets' ) );
 	}
@@ -138,7 +147,14 @@ class DBR54_Garanzia_Frontend {
 		echo '</ul>';
 	}
 
+	/**
+	 * Guest access via shortcode: order number + email lookup.
+	 *
+	 * Anonymous visitors are verified by DBR54_Guest_Guard (same-site origin +
+	 * per-IP rate limit, no nonce in cached HTML); logged-in users by nonce.
+	 */
 	public function guest_shortcode(): string {
+		DBR54_Guest_Guard::no_cache();
 		ob_start();
 
 		if ( $this->maybe_render_result() ) {
@@ -146,16 +162,23 @@ class DBR54_Garanzia_Frontend {
 		}
 
 		$matched = false;
-		if ( isset( $_POST['dbr54_gar_lookup'] ) && check_admin_referer( 'dbr54_gar_lookup', 'dbr54_gar_nonce' ) ) {
-			$number = isset( $_POST['dbr54_order_number'] ) ? sanitize_text_field( wp_unslash( $_POST['dbr54_order_number'] ) ) : '';
-			$email  = isset( $_POST['dbr54_email'] ) ? sanitize_email( wp_unslash( $_POST['dbr54_email'] ) ) : '';
-			$order  = $this->lookup_guest_order( $number, $email );
-
-			if ( $order ) {
-				$matched = true;
-				$this->render_form( $order, 'guest', $email );
+		if ( isset( $_POST['dbr54_gar_lookup'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Missing -- solo rilevamento del submit; verifica in DBR54_Guest_Guard::verify().
+			$error = DBR54_Guest_Guard::verify( 'dbr54_gar_lookup', 'dbr54_gar_nonce' );
+			if ( '' !== $error ) {
+				$this->notice( $error, 'error' );
 			} else {
-				$this->notice( __( 'Nessun ordine corrisponde ai dati inseriti.', 'db-recesso-54bis' ), 'error' );
+				// phpcs:disable WordPress.Security.NonceVerification.Missing -- verificati in DBR54_Guest_Guard::verify().
+				$number = isset( $_POST['dbr54_order_number'] ) ? sanitize_text_field( wp_unslash( $_POST['dbr54_order_number'] ) ) : '';
+				$email  = isset( $_POST['dbr54_email'] ) ? sanitize_email( wp_unslash( $_POST['dbr54_email'] ) ) : '';
+				// phpcs:enable
+				$order = $this->lookup_guest_order( $number, $email );
+
+				if ( $order ) {
+					$matched = true;
+					$this->render_form( $order, 'guest', $email );
+				} else {
+					$this->notice( __( 'Nessun ordine corrisponde ai dati inseriti.', 'db-recesso-54bis' ), 'error' );
+				}
 			}
 		}
 
@@ -183,7 +206,7 @@ class DBR54_Garanzia_Frontend {
 		<form method="post" class="dbr54-form dbr54-guest-lookup">
 			<h2><?php esc_html_e( 'Garanzia legale di conformità', 'db-recesso-54bis' ); ?></h2>
 			<p><?php esc_html_e( 'Inserisci il numero ordine e l\'email usata per l\'acquisto.', 'db-recesso-54bis' ); ?></p>
-			<?php wp_nonce_field( 'dbr54_gar_lookup', 'dbr54_gar_nonce' ); ?>
+			<?php DBR54_Guest_Guard::nonce_field( 'dbr54_gar_lookup', 'dbr54_gar_nonce' ); ?>
 			<p>
 				<label for="dbr54_order_number"><?php esc_html_e( 'Numero ordine', 'db-recesso-54bis' ); ?></label>
 				<input type="text" id="dbr54_order_number" name="dbr54_order_number" required>
@@ -213,7 +236,7 @@ class DBR54_Garanzia_Frontend {
 			<p><?php esc_html_e( 'Garanzia legale di conformità (art. 128-135 Cod. Consumo). Descrivi il difetto: il venditore valuterà la pratica e ti proporrà il rimedio previsto dalla legge.', 'db-recesso-54bis' ); ?></p>
 
 			<form method="post" class="dbr54-form">
-				<?php wp_nonce_field( 'dbr54_gar_confirm_' . $order->get_id(), 'dbr54_gar_confirm_nonce' ); ?>
+				<?php DBR54_Guest_Guard::nonce_field( 'dbr54_gar_confirm_' . $order->get_id(), 'dbr54_gar_confirm_nonce' ); ?>
 				<input type="hidden" name="dbr54_order_id" value="<?php echo esc_attr( $order->get_id() ); ?>">
 				<input type="hidden" name="dbr54_claimant_type" value="<?php echo esc_attr( $claimant_type ); ?>">
 				<?php if ( 'guest' === $claimant_type ) : ?>
@@ -259,16 +282,34 @@ class DBR54_Garanzia_Frontend {
 	}
 
 	public function handle_submission(): void {
-		if ( empty( $_POST['dbr54_gar_confirm'] ) ) {
+		if ( empty( $_POST['dbr54_gar_confirm'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Missing -- solo rilevamento del submit; verifica in DBR54_Guest_Guard::verify().
 			return;
 		}
+		// phpcs:disable WordPress.Security.NonceVerification.Missing -- verificati in DBR54_Guest_Guard::verify() (nonce per i loggati, origin + rate limit per gli anonimi).
 		$order_id = isset( $_POST['dbr54_order_id'] ) ? absint( $_POST['dbr54_order_id'] ) : 0;
-		if ( ! $order_id || ! check_admin_referer( 'dbr54_gar_confirm_' . $order_id, 'dbr54_gar_confirm_nonce' ) ) {
+		if ( ! $order_id ) {
 			return;
 		}
+
+		// Errors are shown to the user via the PRG outcome, never a bare wp_die().
+		$error = DBR54_Guest_Guard::verify( 'dbr54_gar_confirm_' . $order_id, 'dbr54_gar_confirm_nonce' );
+		if ( '' !== $error ) {
+			$this->redirect_with_result(
+				array(
+					'success' => false,
+					'error'   => $error,
+				)
+			);
+		}
+
 		$order = wc_get_order( $order_id );
 		if ( ! $order ) {
-			return;
+			$this->redirect_with_result(
+				array(
+					'success' => false,
+					'error'   => __( 'Ordine non trovato.', 'db-recesso-54bis' ),
+				)
+			);
 		}
 
 		$claimant_type = isset( $_POST['dbr54_claimant_type'] ) ? sanitize_key( $_POST['dbr54_claimant_type'] ) : 'user';
@@ -277,18 +318,30 @@ class DBR54_Garanzia_Frontend {
 		$product_ref   = isset( $_POST['dbr54_product_ref'] ) ? sanitize_text_field( wp_unslash( $_POST['dbr54_product_ref'] ) ) : '';
 		$defect        = isset( $_POST['dbr54_defect'] ) ? sanitize_textarea_field( wp_unslash( $_POST['dbr54_defect'] ) ) : '';
 		$remedy        = isset( $_POST['dbr54_remedy'] ) ? sanitize_key( $_POST['dbr54_remedy'] ) : 'nessuna';
+		// phpcs:enable
 
+		$unauthorised = array(
+			'success' => false,
+			'error'   => __( 'Autorizzazione non valida.', 'db-recesso-54bis' ),
+		);
 		if ( 'user' === $claimant_type ) {
 			if ( ! is_user_logged_in() || $order->get_customer_id() !== get_current_user_id() ) {
-				wp_die( esc_html__( 'Autorizzazione non valida.', 'db-recesso-54bis' ) );
+				$this->redirect_with_result( $unauthorised );
 			}
 			$email = $order->get_billing_email();
 		} elseif ( ! $email || strtolower( $order->get_billing_email() ) !== strtolower( $email ) ) {
-				wp_die( esc_html__( 'Autorizzazione non valida.', 'db-recesso-54bis' ) );
+			$this->redirect_with_result( $unauthorised );
 		}
 
-		$result = $this->garanzia()->process( $order, $claimant_type, $email, $product_ref, $defect, $remedy );
+		$this->redirect_with_result( $this->garanzia()->process( $order, $claimant_type, $email, $product_ref, $defect, $remedy ) );
+	}
 
+	/**
+	 * PRG: store the outcome in a short-lived transient and redirect.
+	 *
+	 * @return never
+	 */
+	private function redirect_with_result( array $result ): void {
 		$token = wp_generate_password( 20, false, false );
 		set_transient( 'dbr54_gar_result_' . $token, $result, 5 * MINUTE_IN_SECONDS );
 

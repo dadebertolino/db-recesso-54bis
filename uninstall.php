@@ -13,6 +13,8 @@ if ( ! defined( 'WP_UNINSTALL_PLUGIN' ) ) {
 	exit;
 }
 
+wp_clear_scheduled_hook( 'dbr54_retention_purge' );
+
 if ( defined( 'DBR54_DELETE_DATA_ON_UNINSTALL' ) && DBR54_DELETE_DATA_ON_UNINSTALL ) {
 	global $wpdb;
 	$wpdb->query( "DROP TABLE IF EXISTS {$wpdb->prefix}dbr54_recessi" );  // phpcs:ignore

@@ -3,7 +3,7 @@
  * Plugin Name:       DB Recesso 54-bis
  * Plugin URI:        https://www.davidebertolino.it/progetti/
  * Description:        Funzione digitale di recesso conforme all'art. 54-bis del Codice del Consumo (D.Lgs. 209/2025). Aggiunge a WooCommerce un pulsante di recesso, dichiarazione guidata, ricevuta su supporto durevole e integrazione privacy. Self-contained, zero dipendenze esterne.
- * Version:           1.2.1
+ * Version:           1.3.0
  * Author:            Davide Bertolino
  * Author URI:        https://www.davidebertolino.it
  * License:           GPL v2 or later
@@ -22,7 +22,19 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'DBR54_VERSION', '1.2.1' );
+/**
+ * Privacy capabilities (per references/PRIVACY-INTEGRATION.md):
+ *  - Personal data:        YES — wp_dbr54_recessi, wp_dbr54_garanzia (order ref,
+ *                          guest email, reason/defect text) + PDF receipts
+ *  - Third-party scripts:  NO  — optional RFC 3161 TSA call is server-side only
+ *  - User consent:         NO  — legal bases art. 6.1.b / 6.1.c GDPR
+ *  - DSAR-aware:           YES — DBR54_Privacy (export; erase declares retention, art. 17.3.e)
+ *  - Hub-aware:            YES — dbph_processing_register (+ legacy dbseo_processing_register)
+ *  - Retention:            daily cron purge after retention_years
+ */
+define( 'DBR54_DSAR_AVAILABLE', true );
+
+define( 'DBR54_VERSION', '1.3.0' );
 define( 'DBR54_FILE', __FILE__ );
 define( 'DBR54_PATH', plugin_dir_path( __FILE__ ) );
 define( 'DBR54_URL', plugin_dir_url( __FILE__ ) );
@@ -67,6 +79,7 @@ function dbr54_bootstrap() {
 	require_once DBR54_PATH . 'inc/class-db.php';
 	require_once DBR54_PATH . 'inc/class-settings.php';
 	require_once DBR54_PATH . 'inc/class-receipt.php';
+	require_once DBR54_PATH . 'inc/class-guest-guard.php';
 	require_once DBR54_PATH . 'inc/class-recesso.php';
 	require_once DBR54_PATH . 'inc/class-frontend.php';
 	require_once DBR54_PATH . 'inc/class-admin.php';
@@ -148,11 +161,13 @@ register_activation_hook(
 );
 
 /**
- * Deactivation: flush rewrite rules only. Data is preserved.
+ * Deactivation: flush rewrite rules and unschedule the retention purge.
+ * Data is preserved.
  */
 register_deactivation_hook(
 	__FILE__,
 	function () {
+		wp_clear_scheduled_hook( 'dbr54_retention_purge' );
 		flush_rewrite_rules();
 	}
 );

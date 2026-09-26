@@ -37,6 +37,23 @@ class DBR54_Receipt {
 	}
 
 	/**
+	 * Remove the PDF of a receipt (retention cleanup). Best-effort: a missing
+	 * file is not an error. The ref is reduced to a safe basename so a
+	 * tampered DB value can never escape the receipts directory.
+	 */
+	public static function delete_file( string $ref ): void {
+		$ref = sanitize_file_name( basename( $ref ) );
+		if ( '' === $ref ) {
+			return;
+		}
+		$base = wp_upload_dir();
+		$path = trailingslashit( $base['basedir'] ) . 'dbr54-receipts/' . $ref . '.pdf';
+		if ( is_file( $path ) ) {
+			@unlink( $path );
+		}
+	}
+
+	/**
 	 * @return array{ref:string, path:string, url:string}
 	 */
 	public function generate( WC_Order $order, object $record ): array {

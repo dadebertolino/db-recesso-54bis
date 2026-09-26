@@ -16,6 +16,8 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 class DBR54_Privacy {
 
+	const RETENTION_HOOK = 'dbr54_retention_purge';
+
 	private static ?DBR54_Privacy $instance = null;
 
 	public static function instance(): DBR54_Privacy {
@@ -34,6 +36,75 @@ class DBR54_Privacy {
 		// WordPress core DSAR fallback (works without the Hub).
 		add_filter( 'wp_privacy_personal_data_exporters', array( $this, 'core_exporter' ) );
 		add_filter( 'wp_privacy_personal_data_erasers', array( $this, 'core_eraser' ) );
+
+		// Legacy compat: DB SEO Manager 1.2.x "Privacy SEO" register (the Hub dedupes by id).
+		add_filter( 'dbseo_processing_register', array( $this, 'register_processing' ) );
+
+		// Retention enforcement (art. 5.1.e GDPR): daily purge of expired records.
+		add_action( 'init', array( __CLASS__, 'schedule_retention' ) );
+		add_action( self::RETENTION_HOOK, array( $this, 'purge_expired' ) );
+	}
+
+	/**
+	 * Schedule the daily retention purge once (idempotent).
+	 */
+	public static function schedule_retention(): void {
+		if ( ! wp_next_scheduled( self::RETENTION_HOOK ) ) {
+			wp_schedule_event( time() + HOUR_IN_SECONDS, 'daily', self::RETENTION_HOOK );
+		}
+	}
+
+	/**
+	 * Delete withdrawal records and guarantee claims older than the declared
+	 * retention (received_at is stored in UTC), together with their PDF
+	 * receipts. A retention of 0/empty means "keep forever": nothing is purged.
+	 */
+	public function purge_expired(): void {
+		$years = (int) $this->settings()->get( 'retention_years', 10 );
+		if ( $years <= 0 ) {
+			return;
+		}
+
+		$cutoff = gmdate( 'Y-m-d H:i:s', strtotime( '-' . $years . ' years' ) );
+
+		self::purge_table( DBR54_DB::table(), $cutoff );
+		if ( class_exists( 'DBR54_Garanzia_DB' ) ) {
+			self::purge_table( DBR54_Garanzia_DB::table(), $cutoff );
+		}
+	}
+
+	/**
+	 * Batch-delete rows with received_at < $cutoff from one plugin table,
+	 * removing the related PDF receipt first.
+	 */
+	private static function purge_table( string $table, string $cutoff ): void {
+		global $wpdb;
+
+		// Bounded run: at most 20 × 500 rows per day, the rest on the next run.
+		for ( $i = 0; $i < 20; $i++ ) {
+			$rows = $wpdb->get_results(
+				$wpdb->prepare( "SELECT id, receipt_ref FROM {$table} WHERE received_at < %s ORDER BY id ASC LIMIT 500", $cutoff )
+			);
+			if ( empty( $rows ) ) {
+				return;
+			}
+
+			$ids = array();
+			foreach ( $rows as $row ) {
+				if ( ! empty( $row->receipt_ref ) ) {
+					DBR54_Receipt::delete_file( (string) $row->receipt_ref );
+				}
+				$ids[] = (int) $row->id;
+			}
+
+			$placeholders = implode( ',', array_fill( 0, count( $ids ), '%d' ) );
+			// phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare
+			$wpdb->query( $wpdb->prepare( "DELETE FROM {$table} WHERE id IN ($placeholders)", $ids ) );
+
+			if ( count( $rows ) < 500 ) {
+				return;
+			}
+		}
 	}
 
 	private function settings(): DBR54_Settings {
@@ -58,7 +129,7 @@ class DBR54_Privacy {
 			'data_collected' => __( 'Riferimento all\'ordine, email del dichiarante (solo ospiti), motivo del recesso (facoltativo), data e ora di ricezione.', 'db-recesso-54bis' ),
 			'retention'      => sprintf(
 				/* translators: %d: years */
-				_n( '%d anno, allineato ai termini di prescrizione ordinari.', '%d anni, allineati ai termini di prescrizione ordinari.', $retention, 'db-recesso-54bis' ),
+				_n( '%d anno, allineato ai termini di prescrizione ordinari. Cancellazione automatica giornaliera (record e ricevuta PDF) allo scadere.', '%d anni, allineati ai termini di prescrizione ordinari. Cancellazione automatica giornaliera (record e ricevute PDF) allo scadere.', $retention, 'db-recesso-54bis' ),
 				$retention
 			),
 			'transfers'      => __( 'Nessuno.', 'db-recesso-54bis' ),
@@ -74,7 +145,7 @@ class DBR54_Privacy {
 				'data_collected' => __( 'Riferimento all\'ordine, email del richiedente (solo ospiti), prodotto interessato, descrizione del difetto, preferenza di rimedio (facoltativa), data e ora di apertura.', 'db-recesso-54bis' ),
 				'retention'      => sprintf(
 					/* translators: %d: years */
-					_n( '%d anno, allineato ai termini di prescrizione ordinari.', '%d anni, allineati ai termini di prescrizione ordinari.', $retention, 'db-recesso-54bis' ),
+					_n( '%d anno, allineato ai termini di prescrizione ordinari. Cancellazione automatica giornaliera (record e ricevuta PDF) allo scadere.', '%d anni, allineati ai termini di prescrizione ordinari. Cancellazione automatica giornaliera (record e ricevute PDF) allo scadere.', $retention, 'db-recesso-54bis' ),
 					$retention
 				),
 				'transfers'      => __( 'Nessuno.', 'db-recesso-54bis' ),
@@ -187,12 +258,16 @@ class DBR54_Privacy {
 
 	// ---- DB Privacy Hub exporter/eraser ----
 
+	/**
+	 * Hub channel. The Hub mirrors this entry into wp_privacy_personal_data_*
+	 * under the same slug, so the callback MUST return the WP core shape
+	 * (exporter: data + done; eraser: items_removed/items_retained/messages/done).
+	 * Both channels therefore share the core callbacks.
+	 */
 	public function hub_exporter( array $exporters ): array {
 		$exporters['dbr54_recesso'] = array(
 			'label'    => __( 'Recessi art. 54-bis', 'db-recesso-54bis' ),
-			'callback' => function ( string $email ) {
-				return $this->export_items_for( $email );
-			},
+			'callback' => array( $this, 'core_export_callback' ),
 		);
 		return $exporters;
 	}
@@ -200,16 +275,7 @@ class DBR54_Privacy {
 	public function hub_eraser( array $erasers ): array {
 		$erasers['dbr54_recesso'] = array(
 			'label'    => __( 'Recessi art. 54-bis', 'db-recesso-54bis' ),
-			'callback' => function ( string $email ) {
-				// Evidential exception: do NOT delete. Declare and retain.
-				return array(
-					'items_removed'  => false,
-					'items_retained' => $this->has_any( $email ),
-					'messages'       => array(
-						__( 'I record di recesso sono conservati per accertamento, esercizio o difesa di un diritto (eccezione all\'art. 17 GDPR) per la durata prevista dalla retention.', 'db-recesso-54bis' ),
-					),
-				);
-			},
+			'callback' => array( $this, 'core_erase_callback' ),
 		);
 		return $erasers;
 	}
@@ -217,6 +283,9 @@ class DBR54_Privacy {
 	// ---- WordPress core DSAR fallback ----
 
 	public function core_exporter( array $exporters ): array {
+		if ( class_exists( 'DBPH_DSAR' ) ) {
+			return $exporters; // Hub present: registered via dbph_user_data_exporters.
+		}
 		$exporters['dbr54_recesso'] = array(
 			'exporter_friendly_name' => __( 'Recessi art. 54-bis', 'db-recesso-54bis' ),
 			'callback'               => array( $this, 'core_export_callback' ),
@@ -233,6 +302,9 @@ class DBR54_Privacy {
 	}
 
 	public function core_eraser( array $erasers ): array {
+		if ( class_exists( 'DBPH_DSAR' ) ) {
+			return $erasers; // Hub present: registered via dbph_user_data_erasers.
+		}
 		$erasers['dbr54_recesso'] = array(
 			'eraser_friendly_name' => __( 'Recessi art. 54-bis', 'db-recesso-54bis' ),
 			'callback'             => array( $this, 'core_erase_callback' ),
@@ -247,7 +319,7 @@ class DBR54_Privacy {
 			'items_removed'  => false,
 			'items_retained' => $has,
 			'messages'       => $has ? array(
-				__( 'Record di recesso conservati per esigenze probatorie (eccezione all\'art. 17 GDPR).', 'db-recesso-54bis' ),
+				__( 'I record di recesso e garanzia sono conservati per accertamento, esercizio o difesa di un diritto (eccezione all\'art. 17.3.e GDPR) e cancellati automaticamente allo scadere della retention.', 'db-recesso-54bis' ),
 			) : array(),
 			'done'           => true,
 		);
